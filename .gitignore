@@ -114,3 +114,8 @@ env.bak/
 
 # python bytecode
 *.pyc
+
+signal_session.session
+signal_session.session-journal
+
+sigcopy.pem
