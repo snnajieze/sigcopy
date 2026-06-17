@@ -13,6 +13,7 @@ Setup:
 
 import asyncio
 import logging
+import time
 from telethon import TelegramClient, events
 from telethon.tl.types import PeerChannel
 from dotenv import load_dotenv
@@ -59,7 +60,9 @@ log = logging.getLogger(__name__)
 #  BOT
 # ─────────────────────────────────────────────
 
-client = TelegramClient("signal_session", API_ID, API_HASH)
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+client = TelegramClient("signal_session", API_ID, API_HASH, loop=loop)
 
 
 def looks_like_signal(text: str) -> bool:
@@ -153,6 +156,21 @@ async def main():
     log.info(f"Output Channel 1: {MY_CHANNEL_1}")
     log.info(f"Output Channel 2: {MY_CHANNEL_2}")
 
+    # Track if we hit the asyncio error
+    loop_error = []
+    loop = asyncio.get_event_loop()
+
+    def handle_exception(loop, context):
+        exception = context.get('exception')
+        if isinstance(exception, RuntimeError) and "got Future" in str(exception):
+            log.warning(
+                "Detected asyncio loop error in Telethon. Restarting...")
+            loop_error.append(True)  # Mark that error occurred
+        # Print the error but don't stop - let client handle reconnection
+        log.debug(f"Asyncio exception: {exception}")
+
+    loop.set_exception_handler(handle_exception)
+
     await client.start()
     log.info("Connected to Telegram")
 
@@ -175,6 +193,15 @@ async def main():
     log.info("Bot is running. Waiting for signals...")
     await client.run_until_disconnected()
 
+    # If we detected the asyncio error, raise it so retry logic can handle it
+    if loop_error:
+        raise RuntimeError("Asyncio event loop error detected - restarting")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        log.info("Bot stopped by user.")
+    finally:
+        loop.close()

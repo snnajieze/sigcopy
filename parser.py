@@ -13,6 +13,7 @@ Stop Loss Adjustment Rules (using 20x leverage as reference):
 
 import re
 import logging
+from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ def parse_targets(text: str) -> list:
     return []
 
 
-def parse_stoploss(text: str) -> float | None:
+def parse_stoploss(text: str) -> Optional[float]:
     """Extract stop loss value as float, or None if not found."""
     m = re.search(
         r'(?:stop.?loss|stop|sl|stoploss)[:\s]*([\d.]+)',
