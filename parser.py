@@ -9,6 +9,13 @@ Stop Loss Adjustment Rules (using 20x leverage as reference):
   - Outside that range → adjust SL to give exactly 110% loss at 20x
   - Same adjusted SL price is used for both channels
     (at 10x it gives ~55% loss)
+
+Invalid Signal Rejection:
+  A message is only treated as a real signal if it has actual numeric
+  values for the entry range, at least one target, and the stop loss.
+  Messages with placeholder text or links instead of real prices
+  (e.g. "Entry = [ CLICK HERE ]", "Take profit = [ CHECK YOURSELF ]")
+  are rejected and skipped entirely.
 """
 
 import re
@@ -47,6 +54,8 @@ def parse_entry(text: str) -> dict:
       Buy: 0.028 - 0.029
       SHORT ZONE: 4680 - 4774
     Returns dict with raw string plus low and high as floats.
+    If no real numbers are found (e.g. "Entry = [ CLICK HERE ]"),
+    low and high stay at 0.0, which signals an invalid entry downstream.
     """
     m = re.search(
         r'(?:entry|buy|long zone|short zone|entry zone)[:\s]*'
@@ -76,6 +85,8 @@ def parse_targets(text: str) -> list:
       Target: 0.028 - 0.029 - 0.030
       1.🎯 4645   2.🎯 4599  ...
       🎯 4645  (plain emoji lines)
+    Returns an empty list if no real numbers are found
+    (e.g. "Take profit = [ CHECK YOURSELF ]").
     """
     # Format A: "Target 1: val", "TP1 val", etc.
     numbered = re.findall(
@@ -101,7 +112,10 @@ def parse_targets(text: str) -> list:
 
 
 def parse_stoploss(text: str) -> Optional[float]:
-    """Extract stop loss value as float, or None if not found."""
+    """
+    Extract stop loss value as float, or None if not found
+    (e.g. "StopLoss :- ***" has no usable number).
+    """
     m = re.search(
         r'(?:stop.?loss|stop|sl|stoploss)[:\s]*([\d.]+)',
         text, re.IGNORECASE
@@ -114,6 +128,24 @@ def get_decimals(num: float) -> int:
     s = str(num)
     dot = s.find('.')
     return 0 if dot == -1 else len(s) - dot - 1
+
+
+def contains_link_or_placeholder(text: str) -> bool:
+    """
+    Detects messages that use links or placeholder text instead of
+    real prices, e.g.:
+      Entry = [ CLICK HERE ]
+      Take profit = [ CHECK YOURSELF ]
+    These are promotional/teaser posts, not real signals.
+    """
+    patterns = [
+        r'https?://',
+        r't\.me/',
+        r'www\.',
+        r'click\s*here',
+        r'check\s*yourself',
+    ]
+    return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 
 # ─────────────────────────────────────────────
@@ -166,13 +198,47 @@ def adjust_stoploss(direction: str, entry_low: float, entry_high: float,
 
 
 # ─────────────────────────────────────────────
+#  VALIDATION
+# ─────────────────────────────────────────────
+
+def validate_signal(raw_text: str, entry: dict, targets: list,
+                    raw_sl: Optional[float]) -> Optional[str]:
+    """
+    Confirms a message is a complete, real trading signal.
+    Returns None if valid, or a string reason if it should be skipped.
+
+    A real signal must have:
+      - No embedded links or placeholder text
+      - A real entry price range (not "CLICK HERE" or similar)
+      - At least one real target price (not "CHECK YOURSELF")
+      - A real stop loss price (not "***" or blank)
+    """
+    if contains_link_or_placeholder(raw_text):
+        return "contains a link or placeholder text instead of real prices"
+
+    if entry["low"] <= 0 or entry["high"] <= 0:
+        return "missing or invalid entry price"
+
+    if not targets:
+        return "missing target price(s)"
+
+    if raw_sl is None:
+        return "missing stop loss price"
+
+    return None
+
+
+# ─────────────────────────────────────────────
 #  CORE PARSER
 # ─────────────────────────────────────────────
 
-def parse_signal(raw_text: str) -> dict:
+def parse_signal(raw_text: str) -> Optional[dict]:
     """
     Parse a raw signal from any source channel into a structured dict.
     Adjusts the stop loss if it falls outside the acceptable risk range.
+
+    Returns None if the message is not a complete, valid signal
+    (e.g. contains links/placeholders instead of real prices).
     """
     # Extract coin
     coin_match = re.search(r'#([A-Z0-9]+(?:/USDT)?)', raw_text, re.IGNORECASE)
@@ -186,27 +252,29 @@ def parse_signal(raw_text: str) -> dict:
     targets = parse_targets(raw_text)
     raw_sl = parse_stoploss(raw_text)
 
-    # Adjust SL if we have enough data
-    if raw_sl is not None and entry["low"] > 0:
-        final_sl, adjusted, loss_pct_20x = adjust_stoploss(
-            direction, entry["low"], entry["high"], raw_sl
-        )
-        # Preserve decimal precision of original values
-        decimals = max(get_decimals(raw_sl), get_decimals(entry["low"]))
-        stoploss = f"{final_sl:.{decimals}f}"
+    # Reject incomplete or fake signals before doing anything else
+    reason = validate_signal(raw_text, entry, targets, raw_sl)
+    if reason:
+        log.warning(f"Skipped signal for {coin}: {reason}")
+        return None
 
-        if adjusted:
-            log.info(
-                f"SL adjusted: {raw_sl} → {stoploss} "
-                f"(loss at 20x: {loss_pct_20x:.2f}%, at 10x: {loss_pct_20x/2:.2f}%)"
-            )
-        else:
-            log.info(
-                f"SL OK: {stoploss} "
-                f"(loss at 20x: {loss_pct_20x:.2f}%, at 10x: {loss_pct_20x/2:.2f}%)"
-            )
+    # At this point entry, targets, and raw_sl are guaranteed valid
+    final_sl, adjusted, loss_pct_20x = adjust_stoploss(
+        direction, entry["low"], entry["high"], raw_sl
+    )
+    decimals = max(get_decimals(raw_sl), get_decimals(entry["low"]))
+    stoploss = f"{final_sl:.{decimals}f}"
+
+    if adjusted:
+        log.info(
+            f"SL adjusted: {raw_sl} → {stoploss} "
+            f"(loss at 20x: {loss_pct_20x:.2f}%, at 10x: {loss_pct_20x/2:.2f}%)"
+        )
     else:
-        stoploss = str(raw_sl) if raw_sl is not None else "N/A"
+        log.info(
+            f"SL OK: {stoploss} "
+            f"(loss at 20x: {loss_pct_20x:.2f}%, at 10x: {loss_pct_20x/2:.2f}%)"
+        )
 
     return {
         "coin":      coin,
@@ -279,9 +347,12 @@ def format_channel2(signal: dict) -> str:
 #  MAIN PIPELINE
 # ─────────────────────────────────────────────
 
-def process_signal(raw_text: str) -> tuple[str, str]:
+def process_signal(raw_text: str) -> Optional[tuple[str, str]]:
     """
     Full pipeline: raw text → (channel1_msg, channel2_msg)
+    Returns None if the message is not a valid, complete signal.
     """
     signal = parse_signal(raw_text)
+    if signal is None:
+        return None
     return format_channel1(signal), format_channel2(signal)

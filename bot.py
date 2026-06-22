@@ -109,10 +109,17 @@ async def on_new_signal(event):
     log.info(f"Signal detected from {event.chat_id}:\n{raw}\n")
 
     try:
-        msg1, msg2 = process_signal(raw)
+        result = process_signal(raw)
     except Exception as e:
         log.error(f"Parser error: {e}")
         return
+
+    if result is None:
+        log.info(
+            "Skipped: not a complete/valid signal (missing data or contains a link).")
+        return
+
+    msg1, msg2 = result
 
     try:
         if ch1_entity:
