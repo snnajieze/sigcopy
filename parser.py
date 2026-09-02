@@ -5,7 +5,7 @@ into two different output formats for your personal channels.
 
 Stop Loss Adjustment Rules (using 20x leverage as reference):
   - Entry reference: highest price for Long, lowest price for Short
-  - Acceptable loss range: 100% – 128% at 20x → keep original SL
+  - Acceptable loss range: 115% – 128% at 20x → keep original SL
   - Outside that range → adjust SL to give exactly 110% loss at 20x
   - Same adjusted SL price is used for both channels
     (at 10x it gives ~55% loss)
@@ -161,7 +161,7 @@ def adjust_stoploss(direction: str, entry_low: float, entry_high: float,
       Short → lowest entry price  (closest to market when going short)
 
     Acceptable range: 100% – 128% loss at 20x → keep original SL.
-    Outside that range → adjust SL to give exactly 110% loss at 20x.
+    Outside that range → adjust SL to give exactly 115% loss at 20x.
     Same SL price is used for both channels (gives ~55% loss at 10x).
 
     Returns:
@@ -177,11 +177,11 @@ def adjust_stoploss(direction: str, entry_low: float, entry_high: float,
     )
 
     # Already within acceptable range — keep as-is
-    if 100 <= loss_pct <= 128:
+    if 115 <= loss_pct <= 128:
         return raw_sl, False, loss_pct
 
-    # Adjust to exactly 110% loss at 20x
-    target_loss = 1.10
+    # Adjust to exactly 115% loss at 20x
+    target_loss = 1.15
     new_sl = (
         entry_ref * (1 - target_loss / leverage)
         if direction == "Long"
@@ -219,12 +219,25 @@ def validate_signal(raw_text: str, entry: dict, targets: list,
     if entry["low"] <= 0 or entry["high"] <= 0:
         return "missing or invalid entry price"
 
+    if entry["low"] == entry["high"]:
+        return "entry is a single price, not a real entry zone/range"
+
     if not targets:
         return "missing target price(s)"
 
     if raw_sl is None:
         return "missing stop loss price"
 
+    return None
+
+
+def validate_coin(coin: str) -> Optional[str]:
+    """
+    Confirms the coin pair was actually identified from the message.
+    Returns None if valid, or a reason string if it should be skipped.
+    """
+    if coin == "UNKNOWN/USDT":
+        return "could not identify a valid coin pair"
     return None
 
 
@@ -251,6 +264,12 @@ def parse_signal(raw_text: str) -> Optional[dict]:
     entry = parse_entry(raw_text)
     targets = parse_targets(raw_text)
     raw_sl = parse_stoploss(raw_text)
+
+    # Reject if we couldn't identify a real coin pair (e.g. wrong format, no # tag)
+    coin_reason = validate_coin(coin)
+    if coin_reason:
+        log.warning(f"Skipped signal: {coin_reason}")
+        return None
 
     # Reject incomplete or fake signals before doing anything else
     reason = validate_signal(raw_text, entry, targets, raw_sl)
