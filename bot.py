@@ -75,7 +75,7 @@ log = logging.getLogger(__name__)
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
-client = TelegramClient("signal_session", API_ID, API_HASH, loop=loop)
+client = TelegramClient(session, API_ID, API_HASH, loop=loop)
 
 
 def looks_like_signal(text: str) -> bool:
