@@ -19,6 +19,7 @@ from telethon.tl.types import PeerChannel
 from dotenv import load_dotenv
 import os
 from parser import process_signal
+from telethon.sessions import StringSession
 
 # ─────────────────────────────────────────────
 #  CONFIG
@@ -33,6 +34,13 @@ API_HASH = os.getenv("API_HASH")
 # defaults to current folder locally
 SESSION_DIR = os.getenv("SESSION_DIR", ".")
 SESSION_PATH = os.path.join(SESSION_DIR, "signal_session")
+
+SESSION_STRING = os.getenv("SESSION_STRING", "")
+
+if SESSION_STRING:
+    session = StringSession(SESSION_STRING)  # Railway: no file needed
+else:
+    session = SESSION_PATH                   # Local: uses your .session file as before
 
 # Your two personal output channels (use @username or numeric ID)
 MY_CHANNEL_1 = os.getenv("MY_CHANNEL_1")   # e.g. @mychannel1 or -1001234567890

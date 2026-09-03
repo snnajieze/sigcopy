@@ -117,5 +117,6 @@ env.bak/
 
 signal_session.session
 signal_session.session-journal
+generate_string_session.py
 
 sigcopy.pem
