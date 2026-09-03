@@ -29,6 +29,11 @@ load_dotenv()
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 
+# Session file will be created in the current directory (or SESSION_DIR if set)
+# defaults to current folder locally
+SESSION_DIR = os.getenv("SESSION_DIR", ".")
+SESSION_PATH = os.path.join(SESSION_DIR, "signal_session")
+
 # Your two personal output channels (use @username or numeric ID)
 MY_CHANNEL_1 = os.getenv("MY_CHANNEL_1")   # e.g. @mychannel1 or -1001234567890
 MY_CHANNEL_2 = os.getenv("MY_CHANNEL_2")   # e.g. @mychannel2 or -1009876543210
